@@ -367,20 +367,15 @@ class TeamPulseClient:
     async def resources(
         self,
         type: str | None = None,
-        view: str | None = None,
     ) -> dict[str, Any]:
         """GET /api/lens/resources -- list resources, optionally filtered.
 
         Args:
             type: Resource type filter (e.g. ``'project'``). Omitted when falsy.
-            view: ``'effective'`` (core + overlay merged, the server's default)
-                or ``'raw'`` (unmerged core). Omitted when falsy.
         """
         params: dict[str, str] = {}
         if type:
             params["type"] = type
-        if view:
-            params["view"] = view
         resp = await self._get("/api/lens/resources", params=params or None)
         return self._normalize_list_envelope(resp.json())
 
@@ -398,11 +393,6 @@ class TeamPulseClient:
             raise ValueError("id is required")
         path = f"/api/lens/resources/{id.lstrip('/')}"
         resp = await self._get(path)
-        return resp.json()
-
-    async def graph(self) -> Any:
-        """GET /api/lens/graph -- return the full entity graph."""
-        resp = await self._get("/api/lens/graph")
         return resp.json()
 
     async def search(

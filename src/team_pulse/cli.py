@@ -103,9 +103,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_resources = sub.add_parser("resources", add_help=True)
     p_resources.add_argument("--type", default=None)
-    p_resources.add_argument("--view", default=None, choices=["effective", "raw"])
 
-    sub.add_parser("graph", add_help=True)
     sub.add_parser("status", add_help=True)
 
     p_ask = sub.add_parser("ask-service", add_help=True)
@@ -155,10 +153,7 @@ def _run(args: argparse.Namespace) -> Any:
     if args.command == "resources":
         return tp.resources(
             type=args.type,
-            view=args.view,
         )
-    if args.command == "graph":
-        return tp.graph()
     if args.command == "status":
         return tp.status()
     if args.command == "ask-service":

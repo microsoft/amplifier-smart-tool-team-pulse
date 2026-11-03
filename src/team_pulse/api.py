@@ -119,31 +119,20 @@ def get(id: str, *, config: Config | None = None) -> Any:
 
 def resources(
     type: str | None = None,
-    view: str | None = None,
     *,
     config: Config | None = None,
 ) -> dict[str, Any]:
-    """List resources, optionally filtered by type and view.
+    """List resources, optionally filtered by type.
 
     `type` is commonly `member` or `question`, but that is a hint rather than
     the contract -- this tool holds no list of its own, because the server's
     would go stale in it. `info()` reports the authoritative `resource_types`,
     and an unknown value returns a 400 naming the valid ones.
-
-
-    `view` selects `'effective'` (core + overlay merged, the server's default)
-    or `'raw'` (unmerged core data). `info()` reports the views this server
-    supports.
     """
     return _call(
-        lambda client: client.resources(type=type, view=view),
+        lambda client: client.resources(type=type),
         config,
     )
-
-
-def graph(*, config: Config | None = None) -> Any:
-    """Return the whole entity graph (compact, composed) -- large; cross-resource questions only."""
-    return _call(lambda client: client.graph(), config)
 
 
 def status(*, config: Config | None = None) -> dict[str, Any]:
