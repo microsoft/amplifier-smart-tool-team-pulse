@@ -27,7 +27,6 @@ Each one is a single call, and none needs a model provider.
 | `search` | Find it by words, when you remember a phrase but not where it lives. Substring matching, 50 results by default, 200 max. Returns ids and titles only. | `search()` | yes |
 | `prefix` | List a branch: `members` returns every member, `questions` every question. Cheaper and more precise than `search` when you know the id's shape. | `prefix()` | yes |
 | `get` | Read one page in full, by exact id (`members/jdoe`). The **only** verb that returns a body — the others return ids and titles. Answering without it means answering from titles. | `get()` | yes |
-| `graph` | How everything connects — who is on what, which projects roll up where. For relationship questions a few fetches can't answer. Large payload; prefer targeted lookups. | `graph()` | yes |
 
 **The pattern:** `search` or `prefix` to find ids, then `get` on the ones worth
 reading.

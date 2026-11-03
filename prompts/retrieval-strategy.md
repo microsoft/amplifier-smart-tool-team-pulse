@@ -20,14 +20,10 @@ can quote or build on. Do not loop forever — you have a small turn budget.
    * All of a type → `team_pulse_resources(type="…")`
    * Hierarchical listing → `team_pulse_prefix("…")`
    * Fuzzy → `team_pulse_search(q="…")` then `team_pulse_get` for full body
-   * Cross-resource relationships you can't get from individual fetches →
-     `team_pulse_graph()` (large payload, use sparingly)
 3. **Don't call `team_pulse_info` every time.** Only when you genuinely
    don't know what the API exposes. Most requests already imply the
    resource type.
-4. **Don't call `team_pulse_graph` unless you actually need reverse edges
-   or a cross-type view.** It's the heaviest endpoint.
-5. **Doc-type questions** — when the user references a design doc, a
+4. **Doc-type questions** — when the user references a design doc, a
    markdown reference, or an `INDEX.md` / `README.md` under a project or
    initiative, treat it as a doc-type lookup:
    * Known path → `team_pulse_get(id="docs/<hierarchical/path>.md")`
@@ -77,7 +73,6 @@ explicitly note that the assessment belongs upstream.
 * `team_pulse_search` — naive text search (matches doc content bodies as well as entity titles)
 * `team_pulse_prefix` — hierarchical ID listing (e.g. `team_pulse_prefix("docs/the-rig")`)
 * `team_pulse_get` — single resource by full ID; for `doc` IDs the body comes back as `content` (raw markdown), otherwise as `data` (dict)
-* `team_pulse_graph` — full composed entity graph (use sparingly)
 * `team_pulse_submit_answer` — submit a session-mined answer to a reflection question
   (the one write tool; hardcodes `source="session-mining"`; `question_id` is bare slug only)
 

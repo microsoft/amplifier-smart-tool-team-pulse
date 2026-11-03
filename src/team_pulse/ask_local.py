@@ -25,7 +25,6 @@ from typing import Any
 from team_pulse.api import (
     TeamPulseNotConfigured,
     get,
-    graph,
     info,
     prefix,
     resources,
@@ -139,8 +138,6 @@ def ask_local(question: str, *, config: Config | None = None) -> Answer:
                     type=call.arguments.get("type"),
                     config=cfg,
                 )
-            elif call.name == "graph":
-                result = _run(graph, config=cfg)
             elif call.name == "submit_answer":
                 result = _run(
                     submit_answer,

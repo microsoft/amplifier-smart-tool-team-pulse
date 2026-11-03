@@ -85,7 +85,6 @@ class _FakeClient:
     async def resources(
         self,
         type: str | None = None,
-        view: str | None = None,
     ) -> Any:
         _FakeClient.calls.append(
             (
@@ -93,17 +92,10 @@ class _FakeClient:
                 (),
                 {
                     "type": type,
-                    "view": view,
                 },
             )
         )
         return {"count": 0, "resources": []}
-
-    async def graph(self) -> Any:
-        type(self).calls.append(("graph", (), {}))
-        return {}
-
-        return {"handle": "jdoe"}
 
     async def ask(self, prompt: str, focus: str | None = None) -> Any:
         type(self).calls.append(("ask", (prompt,), {"focus": focus}))
@@ -157,7 +149,6 @@ def test_module_imports_with_empty_environment() -> None:
     assert callable(tp.prefix)
     assert callable(tp.get)
     assert callable(tp.resources)
-    assert callable(tp.graph)
     assert callable(tp.status)
     assert callable(tp.ask_service)
     assert callable(tp.submit_answer)
@@ -167,10 +158,10 @@ def test_module_imports_with_empty_environment() -> None:
     assert callable(tp.capabilities)
 
 
-def test_capabilities_lists_twelve_entries_with_flags() -> None:
-    # 10 deterministic + ask_local (model-backed) + manifest = 12.
+def test_capabilities_lists_eleven_entries_with_flags() -> None:
+    # 9 deterministic + ask_local (model-backed) + manifest = 11.
     caps = {c.name: (c.destructive, c.model_backed) for c in tp.capabilities()}
-    assert len(caps) == 12
+    assert len(caps) == 11
     assert caps["submit_answer"] == (True, False)
     # `configure` is NOT destructive: it merges into the caller's own settings
     # file on their own machine. `destructive` means the write reaches shared
@@ -276,16 +267,9 @@ def test_resources_request_shape(fake_client: type[_FakeClient]) -> None:
             (),
             {
                 "type": "question",
-                "view": None,
             },
         )
     ]
-
-
-def test_resources_passes_view_through(fake_client: type[_FakeClient]) -> None:
-    """`view` selects raw vs effective -- the server still supports both."""
-    tp.resources(type="member", view="raw")
-    assert fake_client.calls[0][2]["view"] == "raw"
 
 
 def test_search_rejects_a_limit_the_server_would_422(
@@ -298,11 +282,9 @@ def test_search_rejects_a_limit_the_server_would_422(
     assert fake_client.calls == [], "no request should reach the client"
 
 
-def test_graph_and_ask_request_shape(fake_client: type[_FakeClient]) -> None:
-    tp.graph()
+def test_ask_request_shape(fake_client: type[_FakeClient]) -> None:
     tp.ask_service("hello", focus="projects/x")
     assert fake_client.calls == [
-        ("graph", (), {}),
         ("ask", ("hello",), {"focus": "projects/x"}),
     ]
 

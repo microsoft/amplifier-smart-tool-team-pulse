@@ -90,8 +90,7 @@ team-pulse search --q "renamed service"
 team-pulse prefix --prefix members
 team-pulse get --id members/jdoe
 team-pulse resources --type question
-team-pulse resources --type member --view raw
-team-pulse graph
+team-pulse resources --type member
 team-pulse ask-service --prompt "How is the team tracking?"
 team-pulse submit-answer --user-id jdoe --question-id higher-level-work --answer "..."
 team-pulse configure --url https://team-pulse.example.com
@@ -137,9 +136,8 @@ Two things worth knowing before writing a loop:
    returns the resource ids its answer rests on. Driving `search`/`get` by hand
    is for when you already know the shape of what you want.
 
-3. **Prefer the cheap calls.** `get` and `resources` are precise and small.
-   `graph` returns the entire vault in one payload; use it only for
-   cross-resource relationships that targeted fetches cannot give you.
+3. **Prefer targeted lookups.** Use `resources`, `search` or `prefix` to find
+   resource IDs, then `get` the ones worth reading.
 
 4. **Surface errors verbatim.** Quote the envelope's `type` and `message` back
    rather than paraphrasing. The common ones are 404 (wrong id -- `search` or
@@ -162,19 +160,20 @@ Two things worth knowing before writing a loop:
 
 ## Data model reference
 
-> **Ported from the bundle's `context/using-team-pulse.md`, verbatim except
-> for capability names.** It predates the current server: the taxonomy below
-> lists eight resource types, of which the live deployment keeps `member`,
-> `question` and `doc`. `info` reports the authoritative `resource_types` for
-> the server you are talking to -- trust it over this table, and read the ids
-> in the examples as illustrative shapes rather than resources that exist.
+> **Ported from the bundle's `context/using-team-pulse.md`, with capability
+> names adapted and retired endpoints/options removed.** It predates the current
+> server: the taxonomy below lists eight resource types, of which the live
+> deployment keeps `member`, `question` and `doc`. `info` reports the authoritative
+> `resource_types` for the server you are talking to -- trust it over this table,
+> and read the ids in the examples as illustrative shapes rather than resources
+> that exist.
 
 ### What team-pulse is
 
 A small read-only HTTP service exposing structured data about a team — what
 people work on, how that work rolls up, and current status. The data comes
 from a markdown-based "vault" that team members edit by hand; the lens API
-returns a merged view (core + overlay) suitable for tooling and assistants.
+returns resource data suitable for tooling and assistants.
 
 #### Resource taxonomy
 
@@ -268,21 +267,6 @@ ID/title/type only, same shape as every other list response.
 Every error path uses this shape. The tool layer surfaces it verbatim in
 `ToolResult.error` — you can quote `error.message` back to the user.
 
-### raw vs effective view
-
-The vault has two layers:
-
-* **core** — the canonical markdown the team edits.
-* **overlay** — extra status / metadata the lens computes or that's been
-  recorded out-of-band.
-
-`view=effective` (the default) returns core merged with overlay — the
-single source of truth for "what is this thing right now".
-`view=raw` returns core only. Use raw when you want to distinguish what
-was hand-authored from what was computed.
-
-If you're unsure, use `effective` — it's what humans see in the team-pulse UI.
-
 ### Endpoint reference (mapped to tools)
 
 | Tool | Wraps | When to use |
@@ -292,7 +276,6 @@ If you're unsure, use `effective` — it's what humans see in the team-pulse UI.
 | `search(q="auth")` | `GET /api/lens/resources/search` | Free-text search across titles + bodies. Substring-matchy; good for fuzzy lookup, bad for precise queries. |
 | `prefix("members")` | `GET /api/lens/resources/prefix/{p}` | Hierarchical listing — same effect as `resources(type=member)` for top-level prefixes, but works for any prefix. |
 | `get(id="projects/team-pulse")` | `GET /api/lens/resources/{id}` | Fetch one resource by full ID. |
-| `graph()` | `GET /api/lens/graph` | The whole graph + reverse edges in one shot. **Expensive — large payload.** Use when you need cross-type relationships you can't get from individual fetches. |
 | `ask_service(prompt="…")` | `POST /api/lens/ask` | **Online generation.** Ask a natural-language question and get a composed, rendered answer over current team data. Use when you want an interpreted, synthesized answer rather than raw facts. |
 
 ### Common query patterns
@@ -318,18 +301,12 @@ get(id="initiatives/Y")
 # inspect result.data for member references like {handle: "samueljklee"}
 ```
 
-If you need to *reverse* the lookup ("which initiatives is person X on?"),
-the graph endpoint includes computed reverse edges — that's the right tool.
-
 #### "What's Sam working on?"
 
 ```python
 get(id="members/samueljklee")
 # data typically links to current projects/tasks
 ```
-
-For thorough coverage, follow with `graph()` and look at the
-reverse edges keyed on this member ID.
 
 #### Fuzzy lookup
 

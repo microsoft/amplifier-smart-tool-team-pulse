@@ -15,7 +15,7 @@ Descriptions are the bundle's, verbatim, wherever the bundle has a counterpart.
 Each deviation is marked DEVIATION with the fact that forces it.
 
 Names carry the `team_pulse_` prefix on model-facing surfaces because the bare
-words -- search, prefix, graph, answer, get -- are also ordinary English, and
+words -- search, prefix, answer, get -- are also ordinary English, and
 appear as ordinary English inside these very descriptions. The CLI and the
 library get the bare verb, where the command name (`team-pulse search`) and the
 module (`team_pulse.search`) already supply that separation.
@@ -147,9 +147,7 @@ CATALOG: tuple[Capability, ...] = (
             # `question`, which does -- so the enumeration is replaced by a
             # pointer to the authoritative list.
             "a specific class of resource; `info` reports the "
-            "resource_types this server actually holds. ``view`` defaults to "
-            "'effective' (core + overlay merged); pass 'raw' for unmerged "
-            "core data."
+            "resource_types this server actually holds."
         ),
         returns="{count, resources: [{id, title, type}]}",
         arguments=(
@@ -158,16 +156,6 @@ CATALOG: tuple[Capability, ...] = (
                 type="str|None",
                 default="None",
                 help="Optional resource type filter.",
-            ),
-            Argument(
-                name="view",
-                type="str|None",
-                default="None",
-                help=(
-                    "'effective' (core + overlay merged, the default) or "
-                    "'raw' (unmerged core data)."
-                ),
-                enum=("effective", "raw"),
             ),
         ),
         in_model_loop=True,
@@ -236,19 +224,6 @@ CATALOG: tuple[Capability, ...] = (
                 required=True,
             ),
         ),
-        in_model_loop=True,
-    ),
-    Capability(
-        verb="graph",
-        description=(
-            "Fetch the full composed entity graph -- every resource of every "
-            "type plus computed reverse edges, in one response. **Large "
-            "payload**: prefer `resources` / `get` for "
-            "targeted lookups. Use this when you need cross-resource "
-            "relationships (who's on what, which projects roll up to which "
-            "initiative, etc.)."
-        ),
-        returns="dict (server-defined shape)",
         in_model_loop=True,
     ),
     Capability(
