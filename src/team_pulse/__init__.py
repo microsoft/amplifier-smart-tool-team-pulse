@@ -31,6 +31,7 @@ from team_pulse.api import (
     search,
     status,
     submit_answer,
+    whoami,
 )
 from team_pulse.ask_local import Answer, ask_local
 from team_pulse.catalog import public_capabilities
@@ -113,4 +114,5 @@ __all__ = [
     "search",
     "status",
     "submit_answer",
+    "whoami",
 ]

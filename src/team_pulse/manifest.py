@@ -48,6 +48,8 @@ class Manifest:
     body: str = ""
 
     def to_dict(self) -> dict[str, Any]:
+        from team_pulse.catalog import public_capabilities
+
         return {
             "smart_tool_format": self.smart_tool_format,
             "name": self.name,
@@ -70,6 +72,19 @@ class Manifest:
             # caller reading the manifest to learn how to use the tool got
             # nothing that told them.
             "body": self.body,
+            # Callable schemas are derived from the same catalog as model tools.
+            # Host-only Config/path settings are intentionally not model arguments.
+            "capabilities": [
+                {
+                    "name": cap.verb,
+                    "description": cap.description,
+                    "input_schema": cap.as_json_schema(include_hidden=True),
+                    "returns": cap.returns,
+                    "destructive": cap.destructive,
+                    "model_backed": cap.model_backed,
+                }
+                for cap in public_capabilities()
+            ],
         }
 
 

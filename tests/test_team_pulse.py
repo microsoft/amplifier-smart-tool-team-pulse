@@ -7,12 +7,16 @@ network or require real credentials.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import importlib
+import inspect
 import json
 import os as _os
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
+import httpx
 import pytest
 
 import team_pulse as tp
@@ -70,21 +74,55 @@ class _FakeClient:
         type(self).calls.append(("info", (), {}))
         return type(self).info_return
 
-    async def search(self, q: str, limit: int = 50) -> Any:
-        type(self).calls.append(("search", (q,), {"limit": limit}))
+    async def whoami(self) -> Any:
+        type(self).calls.append(("whoami", (), {}))
+        return {"member": {"handle": "jdoe"}}
+
+    async def search(
+        self, q: str, limit: int = 50, *, collection: str | None = None
+    ) -> Any:
+        type(self).calls.append(
+            ("search", (q,), {"limit": limit, "collection": collection})
+        )
         return {"count": 0, "resources": []}
 
-    async def prefix(self, prefix: str) -> Any:
-        type(self).calls.append(("prefix", (prefix,), {}))
+    async def prefix(
+        self, prefix: str, *, limit: int | None = None, offset: int = 0
+    ) -> Any:
+        type(self).calls.append(
+            ("prefix", (prefix,), {"limit": limit, "offset": offset})
+        )
         return {"count": 0, "resources": []}
 
-    async def get(self, id: str) -> Any:
-        type(self).calls.append(("get", (id,), {}))
+    async def get(
+        self,
+        id: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+        expected_revision: str | None = None,
+    ) -> Any:
+        type(self).calls.append(
+            (
+                "get",
+                (id,),
+                {
+                    "offset": offset,
+                    "limit": limit,
+                    "expected_revision": expected_revision,
+                },
+            )
+        )
         return type(self).get_return
 
     async def resources(
         self,
         type: str | None = None,
+        *,
+        collection: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> Any:
         _FakeClient.calls.append(
             (
@@ -92,6 +130,10 @@ class _FakeClient:
                 (),
                 {
                     "type": type,
+                    "collection": collection,
+                    "status": status,
+                    "limit": limit,
+                    "offset": offset,
                 },
             )
         )
@@ -116,7 +158,7 @@ class _FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _clear_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Every test starts with no team-pulse or provider credentials configured."""
     for key in (
         "TEAM_PULSE_URL",
@@ -127,7 +169,11 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ANTHROPIC_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
+    # Saved settings outrank environment variables. Keep these no-network tests
+    # away from the real user's endpoint/credentials as well as their env.
+    monkeypatch.setenv("TEAM_PULSE_DIR", str(tmp_path))
     _FakeClient.calls = []
+    _FakeClient.get_return = {"id": "projects/x", "data": {}}
 
 
 @pytest.fixture
@@ -145,6 +191,7 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> type[_FakeClient]:
 
 def test_module_imports_with_empty_environment() -> None:
     assert callable(tp.info)
+    assert callable(tp.whoami)
     assert callable(tp.search)
     assert callable(tp.prefix)
     assert callable(tp.get)
@@ -158,10 +205,10 @@ def test_module_imports_with_empty_environment() -> None:
     assert callable(tp.capabilities)
 
 
-def test_capabilities_lists_eleven_entries_with_flags() -> None:
-    # 9 deterministic + ask_local (model-backed) + manifest = 11.
+def test_capabilities_lists_twelve_entries_with_flags() -> None:
+    # Includes the explicit caller-identity read.
     caps = {c.name: (c.destructive, c.model_backed) for c in tp.capabilities()}
-    assert len(caps) == 11
+    assert len(caps) == 12
     assert caps["submit_answer"] == (True, False)
     # `configure` is NOT destructive: it merges into the caller's own settings
     # file on their own machine. `destructive` means the write reaches shared
@@ -251,12 +298,16 @@ def test_info_request_shape(fake_client: type[_FakeClient]) -> None:
 
 def test_search_request_shape(fake_client: type[_FakeClient]) -> None:
     tp.search("onboarding", limit=10)
-    assert fake_client.calls == [("search", ("onboarding",), {"limit": 10})]
+    assert fake_client.calls == [
+        ("search", ("onboarding",), {"limit": 10, "collection": None})
+    ]
 
 
 def test_prefix_request_shape(fake_client: type[_FakeClient]) -> None:
     tp.prefix("projects")
-    assert fake_client.calls == [("prefix", ("projects",), {})]
+    assert fake_client.calls == [
+        ("prefix", ("projects",), {"limit": None, "offset": 0})
+    ]
 
 
 def test_resources_request_shape(fake_client: type[_FakeClient]) -> None:
@@ -267,6 +318,10 @@ def test_resources_request_shape(fake_client: type[_FakeClient]) -> None:
             (),
             {
                 "type": "question",
+                "collection": None,
+                "status": None,
+                "limit": None,
+                "offset": 0,
             },
         )
     ]
@@ -785,3 +840,535 @@ def test_answer_never_returns_none(
     ):
         monkeypatch.setattr(answer_mod, "converse", _scripted(*turns))
         assert tp.ask_local("q").answer is not None
+
+
+# ---------------------------------------------------------------------------
+# Lens paging: one request per page, full envelopes, errors stay errors.
+# ---------------------------------------------------------------------------
+
+
+def _document_page() -> dict[str, Any]:
+    # Full captured normalized text, not JSON bytes or a hash of the window.
+    full = "é🙂 evidence\n" * 4000
+    revision = "lens-text-v1:" + hashlib.sha256(full.encode("utf-8")).hexdigest()
+    content = full[:18000]
+    returned = len(content.encode("utf-8"))
+    return {
+        "id": "corpus/repos/example.md",
+        "type": "doc",
+        "content": content,
+        "content_revision": revision,
+        "metadata": {
+            "offset": 0,
+            "returned_bytes": returned,
+            "total_bytes": len(full.encode("utf-8")),
+            "next_offset": returned,
+            "truncated": True,
+            "source_path": "fixture/example.md",
+        },
+    }
+
+
+def _http_read(
+    operation: str, payload: Any, *, response_status: int = 200, **kwargs: Any
+) -> tuple[Any, list[httpx.Request]]:
+    """Use the real authenticated HTTP path against an in-process transport."""
+    from team_pulse.auth import ApiKeyAuth
+    from team_pulse.client import TeamPulseClient
+
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(response_status, json=payload)
+
+    async def run() -> Any:
+        client = TeamPulseClient(
+            base_url="https://fixture.invalid", auth=ApiKeyAuth("tp_test_key")
+        )
+        async with httpx.AsyncClient(
+            base_url="https://fixture.invalid", transport=httpx.MockTransport(handle)
+        ) as http:
+            client._http = http
+            return await getattr(client, operation)(**kwargs)
+
+    return asyncio.run(run()), requests
+
+
+def test_http_get_preserves_full_page_and_does_not_auto_continue() -> None:
+    page = _document_page()
+    result, requests = _http_read("get", page, id=page["id"])
+    assert result == page
+    assert len(requests) == 1
+    assert dict(requests[0].url.params) == {"offset": "0"}
+    assert len(json.dumps(result)) > 32768  # Content budget is not a JSON cap.
+    assert (
+        len(result["content"].encode("utf-8")) == result["metadata"]["returned_bytes"]
+    )
+    assert result["metadata"]["returned_bytes"] <= 32768
+    assert result["metadata"]["truncated"] is True
+
+
+def test_http_get_forwards_pinned_byte_window_exactly() -> None:
+    page = _document_page()
+    result, requests = _http_read(
+        "get",
+        page,
+        id=page["id"],
+        offset=32767,
+        limit=153600,
+        expected_revision=page["content_revision"],
+    )
+    assert result == page
+    assert len(requests) == 1
+    assert requests[0].url.path == "/api/lens/resources/corpus/repos/example.md"
+    assert dict(requests[0].url.params) == {
+        "offset": "32767",
+        "limit": "153600",
+        "expected_revision": page["content_revision"],
+    }
+
+
+@pytest.mark.parametrize("operation", ["resources", "search", "prefix"])
+def test_http_lists_preserve_envelope_and_indexed_hit_revision(operation: str) -> None:
+    payload = {
+        "count": 1,
+        "resources": [
+            {
+                "id": "corpus/repos/example.md",
+                "title": "Example",
+                "snippet": "partial",
+                "content_revision": _document_page()["content_revision"],
+            }
+        ],
+        "metadata": {"truncated": True, "next_offset": 11},
+        "future_field": {"kept": True},
+    }
+    kwargs = {
+        "resources": {
+            "type": "question",
+            "collection": "docs",
+            "status": "all",
+            "limit": 10,
+            "offset": 1,
+        },
+        "search": {"q": "partial", "collection": "corpus", "limit": 10},
+        "prefix": {"prefix": "corpus/repos", "limit": 10, "offset": 1},
+    }[operation]
+    result, requests = _http_read(operation, payload, **kwargs)
+    assert result == payload
+    assert len(requests) == 1
+    expected = {k: str(v) for k, v in kwargs.items() if k != "prefix"}
+    assert dict(requests[0].url.params) == expected
+
+
+@pytest.mark.parametrize(
+    "operation,kwargs",
+    [
+        ("resources", {}),
+        ("prefix", {"prefix": "members"}),
+    ],
+)
+def test_http_browse_default_stays_unbounded(
+    operation: str, kwargs: dict[str, Any]
+) -> None:
+    result, requests = _http_read(operation, {"count": 0, "resources": []}, **kwargs)
+    assert result["count"] == 0
+    assert dict(requests[0].url.params) == {"offset": "0"}
+    assert "limit" not in requests[0].url.params
+
+
+def test_http_entity_remains_structured_and_whoami_is_server_read() -> None:
+    entity = {"id": "members/jdoe", "data": {"handle": "jdoe"}, "metadata": {}}
+    result, requests = _http_read("get", entity, id=entity["id"])
+    assert result == entity
+    assert len(requests) == 1
+    identity, requests = _http_read("whoami", {"member": {"handle": "jdoe"}})
+    assert identity == {"member": {"handle": "jdoe"}}
+    assert requests[0].url.path == "/api/lens/me"
+
+
+@pytest.mark.parametrize(
+    "status,code,operation,kwargs",
+    [
+        (
+            409,
+            "source_changed",
+            "get",
+            {
+                "id": "corpus/repos/example.md",
+                "offset": 32768,
+                "expected_revision": "lens-text-v1:" + "a" * 64,
+            },
+        ),
+        (
+            422,
+            "invalid_argument",
+            "get",
+            {"id": "corpus/repos/example.md", "offset": 2},
+        ),
+        (
+            422,
+            "invalid_argument",
+            "get",
+            {"id": "corpus/repos/example.md", "limit": 153601},
+        ),
+        (503, "search_failed", "search", {"q": "partial"}),
+    ],
+)
+def test_http_failures_remain_errors_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    code: str,
+    operation: str,
+    kwargs: dict[str, Any],
+) -> None:
+    from team_pulse.client import TeamPulseClient
+
+    # Track _request itself as well as the transport so any unpinned fallback
+    # would be observable even when the first request raises.
+    original = TeamPulseClient._request
+    calls: list[Any] = []
+
+    async def tracked(self: Any, *args: Any, **kw: Any) -> Any:
+        calls.append((args, kw))
+        return await original(self, *args, **kw)
+
+    monkeypatch.setattr(TeamPulseClient, "_request", tracked)
+    server = {"code": code, "message": "fixture failure", "status": status}
+    with pytest.raises(tp.TeamPulseAPIError) as exc:
+        _http_read(operation, {"error": server}, response_status=status, **kwargs)
+    assert exc.value.status == status
+    assert exc.value.server == server
+    assert len(calls) == 1
+
+
+def test_successful_zero_hit_search_is_not_error() -> None:
+    empty = {"count": 0, "resources": [], "metadata": {"truncated": False}}
+    assert _http_read("search", empty, q="absent")[0] == empty
+
+
+def test_public_get_and_filters_forward_once(fake_client: type[_FakeClient]) -> None:
+    page = _document_page()
+    fake_client.get_return = page
+    assert (
+        tp.get(
+            page["id"],
+            offset=19,
+            limit=32768,
+            expected_revision=page["content_revision"],
+        )
+        == page
+    )
+    tp.resources("question", collection="docs", status="archived", limit=5, offset=2)
+    tp.prefix("corpus/repos", limit=5, offset=2)
+    tp.search("evidence", collection="corpus", limit=5)
+    assert tp.whoami() == {"member": {"handle": "jdoe"}}
+    assert fake_client.calls == [
+        (
+            "get",
+            (page["id"],),
+            {
+                "offset": 19,
+                "limit": 32768,
+                "expected_revision": page["content_revision"],
+            },
+        ),
+        (
+            "resources",
+            (),
+            {
+                "type": "question",
+                "collection": "docs",
+                "status": "archived",
+                "limit": 5,
+                "offset": 2,
+            },
+        ),
+        ("prefix", ("corpus/repos",), {"limit": 5, "offset": 2}),
+        ("search", ("evidence",), {"limit": 5, "collection": "corpus"}),
+        ("whoami", (), {}),
+    ]
+
+
+def test_manifest_model_schemas_and_public_signatures_align() -> None:
+    from team_pulse.catalog import BY_VERB, model_loop_tools
+    from team_pulse.client import TeamPulseClient
+
+    published = {c["name"]: c for c in tp.manifest().to_dict()["capabilities"]}
+    for name in ("get", "resources", "search", "prefix", "whoami"):
+        schema = published[name]["input_schema"]
+        assert schema == BY_VERB[name].as_json_schema()
+        params = set(inspect.signature(getattr(tp, name)).parameters) - {"config"}
+        assert set(schema["properties"]) == params
+        async_params = set(inspect.signature(getattr(TeamPulseClient, name)).parameters)
+        assert async_params - {"self"} == params
+        model_schema = next(
+            c["input_schema"] for c in model_loop_tools() if c["name"] == name
+        )
+        assert model_schema == schema
+    get_props = published["get"]["input_schema"]["properties"]
+    assert get_props["offset"]["default"] == 0
+    assert get_props["limit"]["maximum"] == 153600
+    assert "default" not in get_props["limit"]  # Omitted uses server default.
+    assert "offset" not in published["search"]["input_schema"]["properties"]
+    assert "metadata" in published["submit_answer"]["input_schema"]["properties"]
+
+
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        (
+            [
+                "get",
+                "--id",
+                "corpus/x.md",
+                "--offset",
+                "32768",
+                "--limit",
+                "1000",
+                "--expected-revision",
+                "lens-text-v1:abc",
+            ],
+            (
+                "get",
+                ("corpus/x.md",),
+                {
+                    "offset": 32768,
+                    "limit": 1000,
+                    "expected_revision": "lens-text-v1:abc",
+                },
+            ),
+        ),
+        (
+            [
+                "resources",
+                "--type",
+                "question",
+                "--collection",
+                "docs",
+                "--status",
+                "all",
+                "--limit",
+                "10",
+                "--offset",
+                "2",
+            ],
+            (
+                "resources",
+                (),
+                {
+                    "type": "question",
+                    "collection": "docs",
+                    "status": "all",
+                    "limit": 10,
+                    "offset": 2,
+                },
+            ),
+        ),
+        (
+            ["search", "--q", "evidence", "--collection", "corpus", "--limit", "10"],
+            ("search", ("evidence",), {"collection": "corpus", "limit": 10}),
+        ),
+        (
+            ["prefix", "--prefix", "corpus", "--limit", "10", "--offset", "2"],
+            ("prefix", ("corpus",), {"limit": 10, "offset": 2}),
+        ),
+        (["whoami"], ("whoami", (), {})),
+    ],
+)
+def test_cli_paging_and_filters_forward(
+    fake_client: type[_FakeClient],
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    expected: Any,
+) -> None:
+    from team_pulse.cli import main
+
+    fake_client.get_return = _document_page()
+    assert main(argv) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert fake_client.calls == [expected]
+    if argv[0] == "get":
+        assert payload == fake_client.get_return
+
+
+@pytest.mark.parametrize(
+    "status,code,argv,fn_name",
+    [
+        (
+            409,
+            "source_changed",
+            [
+                "get",
+                "--id",
+                "corpus/x.md",
+                "--offset",
+                "2",
+                "--expected-revision",
+                "lens-text-v1:old",
+            ],
+            "get",
+        ),
+        (
+            422,
+            "invalid_argument",
+            ["get", "--id", "corpus/x.md", "--offset", "2"],
+            "get",
+        ),
+        (503, "search_failed", ["search", "--q", "evidence"], "search"),
+    ],
+)
+def test_cli_server_error_stays_error_no_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: int,
+    code: str,
+    argv: list[str],
+    fn_name: str,
+) -> None:
+    from team_pulse.cli import main
+
+    calls = []
+    server = {"code": code, "message": "fixture failure", "status": status}
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        raise tp.TeamPulseAPIError(status=status, body=json.dumps({"error": server}))
+
+    monkeypatch.setattr(tp, fn_name, fail)
+    assert main(argv) == 1
+    assert json.loads(capsys.readouterr().out)["error"]["server"] == server
+    assert len(calls) == 1
+
+
+def test_model_loop_receives_whole_page_and_forwards_needed_window(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_client: type[_FakeClient],
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+    page = _document_page()
+    fake_client.get_return = page
+    requested = {
+        "id": page["id"],
+        "offset": 32768,
+        "limit": 153600,
+        "expected_revision": page["content_revision"],
+    }
+    observed = []
+    turns = iter(
+        [
+            _turn(("get", requested)),
+            _turn(("answer", {"answer": "evidence", "citations": [page["id"]]})),
+        ]
+    )
+
+    def converse(**kwargs: Any) -> Any:
+        if kwargs["messages"][-1]["role"] == "tool":
+            observed.append(json.loads(kwargs["messages"][-1]["content"]))
+        return next(turns)
+
+    monkeypatch.setattr(answer_mod, "converse", converse)
+    assert tp.ask_local("question").citations == [page["id"]]
+    assert observed == [page]  # Valid JSON beyond 8000 chars with all metadata.
+    assert fake_client.calls == [
+        ("get", (page["id"],), {k: v for k, v in requested.items() if k != "id"})
+    ]
+
+
+def test_model_loop_forwards_discovery_filters_and_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_client: type[_FakeClient],
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+    monkeypatch.setattr(
+        answer_mod,
+        "converse",
+        _scripted(
+            _turn(("search", {"q": "evidence", "collection": "corpus", "limit": 5})),
+            _turn(
+                (
+                    "resources",
+                    {
+                        "type": "question",
+                        "collection": "docs",
+                        "status": "all",
+                        "limit": 5,
+                        "offset": 2,
+                    },
+                )
+            ),
+            _turn(("prefix", {"prefix": "corpus", "limit": 5, "offset": 2})),
+            _turn(("whoami", {})),
+            _turn(("answer", {"answer": "done", "citations": []})),
+        ),
+    )
+    tp.ask_local("question")
+    assert fake_client.calls == [
+        ("search", ("evidence",), {"collection": "corpus", "limit": 5}),
+        (
+            "resources",
+            (),
+            {
+                "type": "question",
+                "collection": "docs",
+                "status": "all",
+                "limit": 5,
+                "offset": 2,
+            },
+        ),
+        ("prefix", ("corpus",), {"limit": 5, "offset": 2}),
+        ("whoami", (), {}),
+    ]
+
+
+@pytest.mark.parametrize(
+    "status,code,operation,arguments",
+    [
+        (
+            409,
+            "source_changed",
+            "get",
+            {
+                "id": "corpus/x.md",
+                "offset": 32768,
+                "expected_revision": "lens-text-v1:old",
+            },
+        ),
+        (422, "invalid_argument", "get", {"id": "corpus/x.md", "offset": 2}),
+        (503, "search_failed", "search", {"q": "evidence"}),
+    ],
+)
+def test_model_loop_preserves_structured_errors_no_automatic_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_client: type[_FakeClient],
+    status: int,
+    code: str,
+    operation: str,
+    arguments: dict[str, Any],
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+    server = {"code": code, "message": "fixture failure", "status": status}
+    calls, observed = [], []
+    turns = iter(
+        [
+            _turn((operation, arguments)),
+            _turn(("answer", {"answer": "error reported", "citations": []})),
+        ]
+    )
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        raise tp.TeamPulseAPIError(status=status, body=json.dumps({"error": server}))
+
+    def converse(**kwargs: Any) -> Any:
+        if kwargs["messages"][-1]["role"] == "tool":
+            observed.append(json.loads(kwargs["messages"][-1]["content"]))
+        return next(turns)
+
+    monkeypatch.setattr(answer_mod, operation, fail)
+    monkeypatch.setattr(answer_mod, "converse", converse)
+    assert tp.ask_local("question").answer == "error reported"
+    assert len(calls) == 1
+    assert observed[0]["server"] == server
+    assert "error" in observed[0]
