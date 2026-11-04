@@ -90,19 +90,38 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("info", add_help=True)
+    sub.add_parser("whoami", add_help=True)
 
     p_search = sub.add_parser("search", add_help=True)
     p_search.add_argument("--q", required=True)
     p_search.add_argument("--limit", type=int, default=50)
+    p_search.add_argument("--collection", default=None)
 
     p_prefix = sub.add_parser("prefix", add_help=True)
     p_prefix.add_argument("--prefix", required=True)
+    p_prefix.add_argument("--limit", type=int, default=None, help="Record count limit.")
+    p_prefix.add_argument("--offset", type=int, default=0, help="Record offset.")
 
     p_get = sub.add_parser("get", add_help=True)
     p_get.add_argument("--id", required=True)
+    p_get.add_argument(
+        "--offset", type=int, default=0, help="UTF-8 content byte offset."
+    )
+    p_get.add_argument(
+        "--limit", type=int, default=None, help="Content bytes, default 32768."
+    )
+    p_get.add_argument("--expected-revision", default=None)
 
     p_resources = sub.add_parser("resources", add_help=True)
     p_resources.add_argument("--type", default=None)
+    p_resources.add_argument("--collection", default=None)
+    p_resources.add_argument(
+        "--status", choices=("active", "archived", "all"), default=None
+    )
+    p_resources.add_argument(
+        "--limit", type=int, default=None, help="Record count limit."
+    )
+    p_resources.add_argument("--offset", type=int, default=0, help="Record offset.")
 
     sub.add_parser("status", add_help=True)
 
@@ -144,15 +163,26 @@ def _read_file_arg(path: str | None) -> str | None:
 def _run(args: argparse.Namespace) -> Any:
     if args.command == "info":
         return tp.info()
+    if args.command == "whoami":
+        return tp.whoami()
     if args.command == "search":
-        return tp.search(args.q, limit=args.limit)
+        return tp.search(args.q, limit=args.limit, collection=args.collection)
     if args.command == "prefix":
-        return tp.prefix(args.prefix)
+        return tp.prefix(args.prefix, limit=args.limit, offset=args.offset)
     if args.command == "get":
-        return tp.get(args.id)
+        return tp.get(
+            args.id,
+            offset=args.offset,
+            limit=args.limit,
+            expected_revision=args.expected_revision,
+        )
     if args.command == "resources":
         return tp.resources(
             type=args.type,
+            collection=args.collection,
+            status=args.status,
+            limit=args.limit,
+            offset=args.offset,
         )
     if args.command == "status":
         return tp.status()

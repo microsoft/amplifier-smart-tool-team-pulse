@@ -46,6 +46,10 @@ class TeamPulseAPIError(TeamPulseError):
             "Call `info` for this server's resource_types -- the message above "
             "lists the valid values."
         ),
+        "source_changed": (
+            "The document changed. Do not retry automatically without a revision or "
+            "combine these pages. Report the conflict; a deliberate new read starts at offset 0."
+        ),
     }
 
     def __init__(self, *, status: int, body: str) -> None:

@@ -4,10 +4,8 @@ Credentials are read at CALL time via `team_pulse.config.from_env()` (invoked
 indirectly through `TeamPulseClient.from_env()`), never at import time --
 `import team_pulse` succeeds with a completely empty environment.
 
-Two mechanisms are enforced structurally here, not left as prose rules:
-
-  never full-read a big entry file. The same cap applies to the
-  model-backed loop's internal gets (see answer.py); only the deterministic
+Document windows are server-defined. Every get makes one request and preserves
+the returned revision and continuation metadata; no automatic page assembly.
 """
 
 from __future__ import annotations
@@ -85,10 +83,16 @@ def info(*, config: Config | None = None) -> Any:
     return _call(lambda client: client.info(), config)
 
 
+def whoami(*, config: Config | None = None) -> Any:
+    """Read the caller's server-verified identity from /api/lens/me, if supported."""
+    return _call(lambda client: client.whoami(), config)
+
+
 def search(
     q: str,
     limit: int = 50,
     *,
+    collection: str | None = None,
     config: Config | None = None,
 ) -> dict[str, Any]:
     """Substring search across resources. Default limit 50, server max 200.
@@ -99,38 +103,70 @@ def search(
     """
     if not 1 <= limit <= 200:
         raise ValueError(f"limit must be between 1 and 200, got {limit}")
-    return _call(lambda client: client.search(q, limit=limit), config)
+    return _call(
+        lambda client: client.search(q, limit=limit, collection=collection), config
+    )
 
 
-def prefix(prefix: str, *, config: Config | None = None) -> dict[str, Any]:
-    """List every resource whose id starts with *prefix*, e.g. ``'projects'``."""
-    return _call(lambda client: client.prefix(prefix), config)
+def prefix(
+    prefix: str,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+    config: Config | None = None,
+) -> dict[str, Any]:
+    """List an ID branch. Optional limit/offset count records; default is unbounded."""
+    return _call(
+        lambda client: client.prefix(prefix, limit=limit, offset=offset), config
+    )
 
 
-def get(id: str, *, config: Config | None = None) -> Any:
-    """Fetch one resource by full id, e.g. ``'members/jdoe'``.
+def get(
+    id: str,
+    *,
+    offset: int = 0,
+    limit: int | None = None,
+    expected_revision: str | None = None,
+    config: Config | None = None,
+) -> Any:
+    """Fetch one resource or document page by exact ID.
 
-    Index and overview pages can be very large. Locating a specific page with
-    `search()`/`prefix()` is the cheaper route; this returns whatever the
-    server sends.
+    Document offset/limit measure UTF-8 content bytes, not serialized JSON.
+    None uses the server's 32768-byte default (maximum 153600). For a needed
+    continuation use metadata.next_offset and content_revision as expected_revision.
+    Nonzero document offsets require a revision. HTTP 409 source_changed and
+    invalid-argument HTTP 422 remain errors: no unpinned retry or automatic pages.
+    Structured entity responses are unchanged and nonpaged.
     """
-    return _call(lambda client: client.get(id), config)
+    return _call(
+        lambda client: client.get(
+            id, offset=offset, limit=limit, expected_revision=expected_revision
+        ),
+        config,
+    )
 
 
 def resources(
     type: str | None = None,
     *,
+    collection: str | None = None,
+    status: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
     config: Config | None = None,
 ) -> dict[str, Any]:
-    """List resources, optionally filtered by type.
+    """List resources, optionally filtered by type, collection or question status.
 
+    Optional limit/offset count records; the default remains unbounded.
     `type` is commonly `member` or `question`, but that is a hint rather than
     the contract -- this tool holds no list of its own, because the server's
     would go stale in it. `info()` reports the authoritative `resource_types`,
     and an unknown value returns a 400 naming the valid ones.
     """
     return _call(
-        lambda client: client.resources(type=type),
+        lambda client: client.resources(
+            type=type, collection=collection, status=status, limit=limit, offset=offset
+        ),
         config,
     )
 
