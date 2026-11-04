@@ -132,7 +132,7 @@ def get(
     """Fetch one resource or document page by exact ID.
 
     Document offset/limit measure UTF-8 content bytes, not serialized JSON.
-    None uses the server's 32768-byte default (maximum 153600). For a needed
+    None uses the server's 153600-byte default (maximum 153600). For a needed
     continuation use metadata.next_offset and content_revision as expected_revision.
     Nonzero document offsets require a revision. HTTP 409 source_changed and
     invalid-argument HTTP 422 remain errors: no unpinned retry or automatic pages.

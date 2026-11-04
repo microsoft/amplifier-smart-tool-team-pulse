@@ -255,7 +255,7 @@ CATALOG: tuple[Capability, ...] = (
             "assembly. Entities return structured data unchanged. Documents return "
             "content, content_revision and metadata (offset, returned_bytes, total_bytes, "
             "next_offset, truncated). offset/limit measure UTF-8 content bytes, NOT JSON "
-            "envelope bytes; default 32768, max 153600. Only if more evidence is needed, "
+            "envelope bytes; default 153600, max 153600. Only if more evidence is needed, "
             "request metadata.next_offset with expected_revision=content_revision. "
             "A nonzero document offset requires a revision; HTTP 409 source_changed "
             "must stay an error, never automatically retry unpinned. Invalid arguments "
@@ -283,7 +283,7 @@ CATALOG: tuple[Capability, ...] = (
                 default="None",
                 minimum=1,
                 maximum=153600,
-                help="Content byte budget; omitted uses server default 32768, not a JSON cap.",
+                help="Content byte budget; omitted uses server default 153600, not a JSON cap.",
             ),
             Argument(
                 name="expected_revision",

@@ -108,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--offset", type=int, default=0, help="UTF-8 content byte offset."
     )
     p_get.add_argument(
-        "--limit", type=int, default=None, help="Content bytes, default 32768."
+        "--limit", type=int, default=None, help="Content bytes, default 153600."
     )
     p_get.add_argument("--expected-revision", default=None)
 

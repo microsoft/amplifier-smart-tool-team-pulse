@@ -414,7 +414,7 @@ class TeamPulseClient:
             id: Full resource ID (e.g. ``'members/devis'``).
                 Leading slashes are stripped so both forms are accepted.
             offset: UTF-8 byte offset for documents (default 0).
-            limit: Content byte budget; None uses the server default (32768,
+            limit: Content byte budget; None uses the server default (153600,
                 maximum 153600). This does not cap the JSON envelope size.
             expected_revision: Pin the full served text revision. Required for
                 nonzero document offsets; a mismatch is HTTP 409 source_changed.

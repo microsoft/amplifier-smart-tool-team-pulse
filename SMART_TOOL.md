@@ -124,7 +124,7 @@ responses carry `content`, top-level `content_revision` and `metadata` including
 `offset`, `returned_bytes`, `total_bytes`, `next_offset`, `truncated`.
 
 - `offset` and `limit` measure UTF-8 bytes of served content, NOT the JSON envelope.
-- Omitted limit uses the server's **32768-byte (32 KiB)** starting default;
+- Omitted limit retains the server's **153600-byte (150 KiB)** default;
   maximum is **153600** content bytes. The envelope may be larger.
 - Revision identity is `lens-text-v1:` plus SHA-256 of the **full captured served
   normalized text encoded as UTF-8**. It is independent of window size, not a
@@ -162,11 +162,11 @@ team-pulse resources --type question --status all --limit 20 --offset 0
 team-pulse prefix --prefix corpus/repos --limit 20 --offset 0
 team-pulse get --id '<exact returned ID>'
 # If needed: use the actual next_offset and content_revision from that response.
-team-pulse get --id '<same ID>' --offset 32768 --expected-revision 'lens-text-v1:<returned digest>'
+team-pulse get --id '<same ID>' --offset '<returned next_offset>' --expected-revision 'lens-text-v1:<returned digest>'
 ```
 
 The names in examples are illustrative. Reuse actual returned offsets rather
-than assuming every page ends at 32768. Cite only IDs/pages actually consulted.
+than assuming every page ends at the byte limit. Cite only IDs/pages actually consulted.
 
 ### Answer submission and generation
 

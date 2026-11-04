@@ -46,7 +46,7 @@ next_page = tp.get(
 ```
 
 Document `offset`/`limit` are UTF-8 **content bytes**, not total JSON bytes.
-Omitted limit uses the server's **32768-byte (32 KiB)** starting default;
+Omitted limit retains the server's **153600-byte (150 KiB)** default;
 maximum is **153600**. Inspect `metadata.offset`, `returned_bytes`,
 `total_bytes`, `next_offset`, `truncated`. Use the returned offset, never a
 character count. `content_revision` is `lens-text-v1:` plus SHA-256 of the
