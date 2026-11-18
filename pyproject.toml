@@ -12,6 +12,16 @@ dependencies = [
 [project.scripts]
 team-pulse = "team_pulse.cli:main"
 
+[tool.uv]
+# Dependency cooldown: uv takes no version of a package from an index until it
+# has been published for 14 days (a team rule: at least 14 days in every Team
+# Pulse repository). It applies to uv lock, uv add, uv run --with and uv pip.
+# Do not lower or remove it, and do not exempt a package, without the owner's
+# approval; write each exception here with its reason and the date it ends.
+# It covers work in this checkout; `uv tool install` and `uvx` of this package
+# do not read it.
+exclude-newer = "14 days"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
