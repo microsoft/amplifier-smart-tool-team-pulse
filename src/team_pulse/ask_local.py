@@ -30,6 +30,7 @@ from team_pulse.api import (
     resources,
     search,
     submit_answer,
+    whoami,
 )
 from team_pulse.catalog import model_loop_tools
 from team_pulse.config import Config
@@ -124,18 +125,38 @@ def ask_local(question: str, *, config: Config | None = None) -> Answer:
                     search,
                     str(call.arguments.get("q", "")),
                     limit=int(call.arguments.get("limit", 50)),
+                    collection=call.arguments.get("collection"),
                     config=cfg,
                 )
             elif call.name == "get":
-                result = _run(get, str(call.arguments.get("id", "")), config=cfg)
+                result = _run(
+                    get,
+                    str(call.arguments.get("id", "")),
+                    offset=call.arguments.get("offset", 0),
+                    limit=call.arguments.get("limit"),
+                    expected_revision=call.arguments.get("expected_revision"),
+                    config=cfg,
+                )
             elif call.name == "info":
                 result = _run(info, config=cfg)
+            elif call.name == "whoami":
+                result = _run(whoami, config=cfg)
             elif call.name == "prefix":
-                result = _run(prefix, str(call.arguments.get("prefix", "")), config=cfg)
+                result = _run(
+                    prefix,
+                    str(call.arguments.get("prefix", "")),
+                    limit=call.arguments.get("limit"),
+                    offset=call.arguments.get("offset", 0),
+                    config=cfg,
+                )
             elif call.name == "resources":
                 result = _run(
                     resources,
                     type=call.arguments.get("type"),
+                    collection=call.arguments.get("collection"),
+                    status=call.arguments.get("status"),
+                    limit=call.arguments.get("limit"),
+                    offset=call.arguments.get("offset", 0),
                     config=cfg,
                 )
             elif call.name == "submit_answer":
@@ -154,7 +175,9 @@ def ask_local(question: str, *, config: Config | None = None) -> Answer:
                     "role": "tool",
                     "tool_call_id": call.id,
                     "name": call.name,
-                    "content": json.dumps(result, separators=(",", ":"))[:8000],
+                    # The server bounds content. Cutting serialized JSON here
+                    # loses text and can remove revision/continuation metadata.
+                    "content": json.dumps(result, separators=(",", ":")),
                 }
             )
 
@@ -167,7 +190,14 @@ def _run(fn: Any, *args: Any, **kwargs: Any) -> Any:
     try:
         return fn(*args, **kwargs)
     except Exception as exc:  # noqa: BLE001 -- fed back to the model, not raised
-        return {"error": str(exc), "remedy": getattr(exc, "remedy", "")}
+        result: dict[str, Any] = {
+            "error": str(exc),
+            "remedy": getattr(exc, "remedy", ""),
+        }
+        server = getattr(exc, "server", None)
+        if server is not None:
+            result["server"] = server
+        return result
 
 
 def _finish(call: Any) -> Answer:
